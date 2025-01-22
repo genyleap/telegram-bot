@@ -23,7 +23,11 @@ This repository contains a **Telegram Bot** implemented in C++. The bot is desig
 - **JsonCpp**: For parsing JSON responses.
 - **C++ Compiler**: Supports C++11 or later.
 
-### Installation
+---
+
+## Installation
+
+### Linux
 
 1. Clone the repository:
    ```bash
@@ -32,10 +36,68 @@ This repository contains a **Telegram Bot** implemented in C++. The bot is desig
    ```
 
 2. Install dependencies:
-   - On Ubuntu:
+   ```bash
+   sudo apt-get install libcurl4-openssl-dev libjsoncpp-dev
+   ```
+
+3. Build the project:
+   ```bash
+   mkdir build
+   cd build
+   cmake ..
+   make
+   ```
+
+4. Run the bot:
+   ```bash
+   ./TelegramBot YOUR_TELEGRAM_BOT_TOKEN
+   ```
+
+---
+
+### Windows
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/genyleap/telegram-bot
+   cd telegram-bot
+   ```
+
+2. Install dependencies:
+   - Download and install [vcpkg](https://vcpkg.io/) for managing dependencies.
+   - Install `libcurl` and `jsoncpp` using vcpkg:
      ```bash
-     sudo apt-get install libcurl4-openssl-dev libjsoncpp-dev
+     vcpkg install curl jsoncpp
      ```
+
+3. Build the project:
+   - Open the project in Visual Studio or use CMake:
+     ```bash
+     mkdir build
+     cd build
+     cmake -DCMAKE_TOOLCHAIN_FILE=[path-to-vcpkg]/scripts/buildsystems/vcpkg.cmake ..
+     cmake --build .
+     ```
+
+4. Run the bot:
+   ```bash
+   .\TelegramBot YOUR_TELEGRAM_BOT_TOKEN
+   ```
+
+---
+
+### macOS
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/genyleap/telegram-bot
+   cd telegram-bot
+   ```
+
+2. Install dependencies:
+   ```bash
+   brew install curl jsoncpp
+   ```
 
 3. Build the project:
    ```bash
