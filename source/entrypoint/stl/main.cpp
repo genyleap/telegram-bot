@@ -1,4 +1,5 @@
 #include "telegrambot.hpp"
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 
@@ -20,9 +21,21 @@ void handleEchoCommand(const std::string& chatId, const std::string& args, Teleg
     }
 }
 
-int main() {
-    const std::string BOT_TOKEN = "BOT_TOKEN_API";
-    TelegramBot bot(BOT_TOKEN);
+int main(int argc, char* argv[]) {
+    std::string botToken;
+    if (argc > 1) {
+        botToken = argv[1];
+    } else if (const char* tokenEnv = std::getenv("TELEGRAM_BOT_TOKEN")) {
+        botToken = tokenEnv;
+    }
+
+    if (botToken.empty()) {
+        std::cerr << "Usage: " << argv[0] << " <BOT_TOKEN>\n"
+                  << "Or set TELEGRAM_BOT_TOKEN environment variable.\n";
+        return 1;
+    }
+
+    TelegramBot bot(botToken);
 
     // Register commands dynamically
     bot.registerCommand(Command("/time", handleTimeCommand));

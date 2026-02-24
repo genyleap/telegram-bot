@@ -8,6 +8,8 @@
 #include <chrono>
 #include <thread>
 #include <mutex>
+#include <map>
+#include <vector>
 
 #include <curl/curl.h>
 #include <json/json.h>
@@ -38,6 +40,7 @@ private:
     int maxRequests; ///< Maximum number of requests allowed within the interval.
     std::chrono::seconds interval; ///< Time interval for rate limiting.
     std::map<std::string, std::vector<std::chrono::steady_clock::time_point>> userRequestTimestamps; ///< Timestamps of requests per user.
+    std::mutex rateLimiterMutex; ///< Mutex to protect request timestamp state.
 };
 
 // Forward declaration of Command struct

@@ -451,6 +451,28 @@ endif()
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC ${LIB_TARGET_COMPILER_DEFINATION})
 
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(rate_limiter_test
+        source/tests/rate_limiter_test.cpp
+        source/telegrambot.cpp
+        source/network.cpp
+        source/logger.cpp
+    )
+
+    target_include_directories(rate_limiter_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/source
+    )
+
+    target_link_libraries(rate_limiter_test PRIVATE
+        ${LIB_STL_MODULES_LINKER}
+        ${LIB_MODULES}
+        ${OS_LIBS}
+    )
+
+    add_test(NAME rate_limiter_test COMMAND $<TARGET_FILE:rate_limiter_test>)
+endif()
+
 #This command generates installation rules for a project.
 #Install rules specified by calls to the install() command within a source directory. are executed in order during installation.
 install(TARGETS ${PROJECT_NAME} DESTINATION build/bin)

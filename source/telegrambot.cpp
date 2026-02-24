@@ -1,9 +1,12 @@
 #include "telegrambot.hpp"
+#include <algorithm>
+#include <sstream>
 
 RateLimiter::RateLimiter(int maxRequests, std::chrono::seconds interval)
     : maxRequests(maxRequests), interval(interval) {}
 
 bool RateLimiter::allowRequest(const std::string& userId) {
+    std::lock_guard<std::mutex> lock(rateLimiterMutex);
     auto now = std::chrono::steady_clock::now();
     auto& userRequests = userRequestTimestamps[userId];
 
@@ -73,7 +76,18 @@ void TelegramBot::sendMessage(const std::string& chatId, const std::string& text
 
 std::string TelegramBot::urlEncode(const std::string& text) {
     CURL* curl = curl_easy_init();
-    char* encodedText = curl_easy_escape(curl, text.c_str(), text.length());
+    if (!curl) {
+        Logger::error("Failed to initialize CURL for URL encoding.");
+        return {};
+    }
+
+    char* encodedText = curl_easy_escape(curl, text.c_str(), static_cast<int>(text.length()));
+    if (!encodedText) {
+        Logger::error("Failed to URL-encode text.");
+        curl_easy_cleanup(curl);
+        return {};
+    }
+
     std::string result(encodedText);
     curl_free(encodedText);
     curl_easy_cleanup(curl);
@@ -117,13 +131,30 @@ void TelegramBot::pollUpdates() {
 
 void TelegramBot::processUpdates(const Json::Value& updates) {
     for (const auto& update : updates["result"]) {
+        if (!update.isObject() || !update.isMember("update_id")) {
+            continue;
+        }
+
         long long updateId = update["update_id"].asInt64();
-        std::string chatId = std::to_string(update["message"]["chat"]["id"].asInt64());
-        std::string text = update["message"]["text"].asString();
+        updateLastUpdateId(updateId);
+
+        if (!update.isMember("message") || !update["message"].isObject()) {
+            continue;
+        }
+
+        const Json::Value& message = update["message"];
+        if (!message.isMember("chat") || !message["chat"].isObject() || !message["chat"].isMember("id")) {
+            continue;
+        }
+
+        if (!message.isMember("text") || !message["text"].isString()) {
+            continue;
+        }
+
+        std::string chatId = std::to_string(message["chat"]["id"].asInt64());
+        std::string text = message["text"].asString();
 
         Logger::formattedInfo("Received message: {} from chat ID: {}", text, chatId);
-
-        updateLastUpdateId(updateId);
 
         if (!rateLimiter.allowRequest(chatId)) {
             sendMessage(chatId, "Rate limit exceeded. Please try again later.");
@@ -133,11 +164,19 @@ void TelegramBot::processUpdates(const Json::Value& updates) {
         // Find the longest matching command
         std::string command;
         std::string args;
-        for (const auto& [cmdName, _] : commandHandlers) {
-            if (text.rfind(cmdName, 0) == 0) { // Check if text starts with cmdName
-                if (cmdName.length() > command.length()) { // Prefer the longest match
-                    command = cmdName;
-                    args = text.substr(cmdName.length());
+        Command matchedCommand;
+        bool hasMatchedCommand = false;
+
+        {
+            std::lock_guard<std::mutex> lock(commandMutex);
+            for (const auto& [cmdName, registeredCommand] : commandHandlers) {
+                if (text.rfind(cmdName, 0) == 0) { // Check if text starts with cmdName
+                    if (cmdName.length() > command.length()) { // Prefer the longest match
+                        command = cmdName;
+                        args = text.substr(cmdName.length());
+                        matchedCommand = registeredCommand;
+                        hasMatchedCommand = true;
+                    }
                 }
             }
         }
@@ -145,10 +184,8 @@ void TelegramBot::processUpdates(const Json::Value& updates) {
         // Trim leading whitespace from args
         args.erase(0, args.find_first_not_of(' '));
 
-        std::lock_guard<std::mutex> lock(commandMutex);
-        auto it = commandHandlers.find(command);
-        if (it != commandHandlers.end()) {
-            it->second.execute(chatId, args, *this);
+        if (hasMatchedCommand) {
+            matchedCommand.execute(chatId, args, *this);
         } else {
             sendMessage(chatId, "Unknown command. Use /help to see available commands.");
         }
