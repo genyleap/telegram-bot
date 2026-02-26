@@ -1,0 +1,6 @@
+.git
+build/
+*.log
+*.bot_state
+*.bot_state.tmp
+.DS_Store

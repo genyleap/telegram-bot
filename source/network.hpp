@@ -3,7 +3,9 @@
 
 #include <string>
 #include <map>
-#include <shared_mutex>
+#include <mutex>
+#include <curl/curl.h>
+#include <functional>
 
 /**
  * @class Network
@@ -15,11 +17,14 @@
 class Network {
 private:
     /**
-     * @brief Mutex for ensuring thread-safe operations in the `Network` class.
-     *
-     * Allows multiple readers but only one writer at a time.
+     * @brief Persistent CURL handle for reusing connections.
      */
-    mutable std::shared_mutex networkMutex;
+    CURL* m_curlHandle;
+
+    /**
+     * @brief Mutex to protect the shared CURL handle.
+     */
+    mutable std::mutex m_networkMutex;
 
     /**
      * @brief Callback function to handle data received from CURL.
@@ -34,7 +39,33 @@ private:
      */
     static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* outBuffer);
 
+    /**
+     * @brief Progress callback to handle request cancellation.
+     */
+    static int ProgressCallback(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
+                                curl_off_t ultotal, curl_off_t ulnow);
+
 public:
+    /**
+     * @brief Constructs a Network object and initializes the CURL handle.
+     */
+    Network();
+
+    /**
+     * @brief Destructor that cleans up the CURL handle.
+     */
+    ~Network();
+
+    // Network is non-copyable: it owns a unique CURL handle.
+    Network(const Network&) = delete;
+    Network& operator=(const Network&) = delete;
+
+    /**
+     * @brief URL-encodes a string.
+     * @param text The string to encode.
+     * @return The URL-encoded string.
+     */
+    std::string urlEncode(const std::string& text) const;
     /**
      * @brief Constructs a query string from a map of key-value pairs.
      *
@@ -54,10 +85,18 @@ public:
      *
      * @param url The full URL to which the request will be sent.
      * @param response A reference to a string where the server's response will be stored.
+     * @param timeoutSeconds Request timeout in seconds (0 = no timeout). Default: 10.
      * @param verbose A boolean flag to enable verbose output (default: false).
      * @return `true` if the request was successful; `false` otherwise.
      */
-    bool sendRequest(const std::string& url, std::string& response, bool verbose = false);
+    bool sendRequest(const std::string& url, std::string& response,
+                     long timeoutSeconds = 10, bool verbose = false,
+                     std::function<bool()> cancelCheck = nullptr,
+                     const std::map<std::string, std::string>& headers = {});
+
+    bool postRequest(const std::string& url, const std::string& body, std::string& response,
+                     long timeoutSeconds = 10, bool verbose = false,
+                     const std::map<std::string, std::string>& headers = {});
 };
 
 #endif // NETWORK_HPP

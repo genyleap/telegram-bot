@@ -1,11 +1,23 @@
 {
-    "language":"english",
     "debug": true,
-    "system":{
-    "codename":"Template Name",
-    "version":"1.0.0",
-    "last_update":"2020-01-10 07:00:00",
-    "server_host":"127.0.0.1",
-    "encoding":"utf-8"
+    "token": "",
+    "ai_api_key": "",
+    "language": "english",
+    "log_file": "bot.log",
+    "thread_pool_size": 4,
+    "long_poll_timeout": 30,
+    "state_file": ".bot_state",
+    "webhook": {
+        "enabled": false,
+        "url": "",
+        "path": "/webhook",
+        "port": 8443
+    },
+    "system": {
+        "codename": "TelegramBot",
+        "version": "1.0.0",
+        "last_update": "2026-02-26 18:00:00",
+        "server_host": "127.0.0.1",
+        "encoding": "utf-8"
     }
 }

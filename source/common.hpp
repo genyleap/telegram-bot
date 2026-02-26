@@ -95,7 +95,6 @@ constexpr Ref<T> CreateRef(Args&& ... args)
 # define __project_const_noexcept_override const noexcept override
 # define __project_noexcept noexcept
 # define __project_noexcept_expr(x) noexcept(x)
-# define __project_constexpr_virtual virtual constexpr
 # define __project_constexpr constexpr
 # define __project_static_constexpr static constexpr
 # define __project_static_constexpr static constexpr

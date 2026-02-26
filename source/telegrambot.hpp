@@ -10,155 +10,273 @@
 #include <mutex>
 #include <map>
 #include <vector>
+#include <deque>
+#include <csignal>
 
 #include <curl/curl.h>
 #include <json/json.h>
 #include "logger.hpp"
 #include "network.hpp"
+#include "threadpool.hpp"
+#include "statemanager.hpp"
+#include "persistence.hpp"
+#include "webhookserver.hpp"
+
+// ─── Forward declarations ─────────────────────────────────────────────────────
+class TelegramBot;
+class Command;
+class AIBrain;
+struct AIResponse;
+
+/**
+ * @struct BotConfig
+ * @brief Runtime configuration for TelegramBot.
+ */
+struct BotConfig {
+    bool        debug           = false;
+    std::string token;                    ///< Optional: can be set in JSON config
+    int         threadPoolSize  = 4;
+    std::string logFile;
+    std::string stateFile       = ".bot_state";
+    int         longPollTimeout = 30;     ///< getUpdates timeout in seconds (polling mode)
+    std::string aiApiKey;
+
+    // ── Webhook mode ──────────────────────────────────────────────────────
+    bool        webhookMode     = false;
+    std::string webhookUrl;               ///< Public HTTPS URL Telegram sends updates to
+    std::string webhookPath     = "/webhook"; ///< Path on this server
+    int         webhookPort     = 8443;   ///< Local TCP port (behind TLS proxy)
+};
+
+// ─── Keyboard & Media Models ──────────────────────────────────────────────────
+
+/**
+ * @struct InlineKeyboardButton
+ */
+struct InlineKeyboardButton {
+    std::string text;
+    std::string callbackData; ///< Data sent back in callback_query
+    std::string url;          ///< Optional URL to open
+};
+
+/**
+ * @struct InlineKeyboardMarkup
+ */
+struct InlineKeyboardMarkup {
+    std::vector<std::vector<InlineKeyboardButton>> inlineKeyboard;
+    Json::Value toJson() const;
+};
+
+/**
+ * @struct ReplyKeyboardButton
+ */
+struct ReplyKeyboardButton {
+    std::string text;
+};
+
+/**
+ * @struct ReplyKeyboardMarkup
+ */
+struct ReplyKeyboardMarkup {
+    std::vector<std::vector<ReplyKeyboardButton>> keyboard;
+    bool resizeKeyboard = true;
+    bool oneTimeKeyboard = false;
+    Json::Value toJson() const;
+};
+
+/**
+ * @struct ReplyKeyboardRemove
+ */
+struct ReplyKeyboardRemove {
+    bool removeKeyboard = true;
+    Json::Value toJson() const;
+};
 
 /**
  * @class RateLimiter
- * @brief A rate limiter to control the number of requests a user can make within a specified time interval.
+ * @brief Per-user inbound rate limiter (sliding-window token bucket).
  */
 class RateLimiter {
 public:
-    /**
-     * @brief Constructs a RateLimiter object.
-     * @param maxRequests The maximum number of requests allowed within the interval.
-     * @param interval The time interval (in seconds) during which the requests are counted.
-     */
     RateLimiter(int maxRequests, std::chrono::seconds interval);
-
-    /**
-     * @brief Checks if a request from a user is allowed based on the rate limit.
-     * @param userId The unique identifier of the user making the request.
-     * @return True if the request is allowed, false if the rate limit is exceeded.
-     */
     bool allowRequest(const std::string& userId);
 
 private:
-    int maxRequests; ///< Maximum number of requests allowed within the interval.
-    std::chrono::seconds interval; ///< Time interval for rate limiting.
-    std::map<std::string, std::vector<std::chrono::steady_clock::time_point>> userRequestTimestamps; ///< Timestamps of requests per user.
-    std::mutex rateLimiterMutex; ///< Mutex to protect request timestamp state.
+    int                   m_maxRequests;
+    std::chrono::seconds  m_interval;
+    std::map<std::string, std::vector<std::chrono::steady_clock::time_point>> m_userRequestTimestamps;
+    std::mutex            m_rateLimiterMutex;
 };
 
-// Forward declaration of Command struct
-struct Command;
+/**
+ * @class OutboundRateLimiter
+ * @brief Enforces Telegram API outbound limits:
+ *   • 30 messages / second  (global)
+ *   • 20 messages / minute  (per chat)
+ * Callers block until it is safe to send.
+ */
+class OutboundRateLimiter {
+public:
+    OutboundRateLimiter() = default;
+    void throttle(const std::string& chatId);
+
+private:
+    std::mutex                                                          m_mutex;
+    std::deque<std::chrono::steady_clock::time_point>                  m_globalWindow;
+    std::map<std::string, std::deque<std::chrono::steady_clock::time_point>> m_perChatWindow;
+
+    static constexpr int kGlobalMax  = 30;  ///< msgs / second
+    static constexpr int kPerChatMax = 20;  ///< msgs / minute
+};
 
 /**
  * @class TelegramBot
- * @brief A class representing a Telegram bot that can handle commands and send messages.
+ * @brief Production-grade Telegram bot with long-polling, async dispatch,
+ *        outbound rate limiting, persistent state, and graceful shutdown.
  */
 class TelegramBot {
 public:
-    /**
-     * @brief Constructs a TelegramBot object.
-     * @param token The API token for the Telegram bot.
-     */
-    TelegramBot(const std::string& token);
+    explicit TelegramBot(const std::string& token, const BotConfig& config = {});
+    ~TelegramBot();
 
-    /**
-     * @brief Registers a command with the bot.
-     * @param command The command to register.
-     */
     void registerCommand(const Command& command);
 
     /**
-     * @brief Starts the bot, polling for updates in a loop.
+     * @brief Runs the polling loop until @p shutdown becomes non-zero.
      */
-    void start();
+    void start(volatile std::sig_atomic_t& shutdown);
 
     /**
-     * @brief Sends a message to a specific chat.
-     * @param chatId The ID of the chat to send the message to.
-     * @param text The text of the message to send.
+     * @brief Registers a webhook URL with the Telegram API.
+     * @param url Full public HTTPS URL Telegram should POST updates to.
+     * @return true on success.
      */
-    void sendMessage(const std::string& chatId, const std::string& text, bool useMarkdown = false);
+    bool setWebhook(const std::string& url);
+
+    /**
+     * @brief Removes the registered webhook (reverts to long-polling mode).
+     * @return true on success.
+     */
+    bool deleteWebhook();
+
+    /**
+     * @brief Starts a webhook HTTP server and blocks until @p shutdown fires.
+     */
+    void startWebhook(volatile std::sig_atomic_t& shutdown);
+
+    /**
+     * @brief Sends a text message with optional keyboard.
+     */
+    bool sendMessage(const std::string& chatId, const std::string& text,
+                     bool useMarkdown = false,
+                     std::optional<Json::Value> replyMarkup = std::nullopt);
+
+    /**
+     * @brief Answers a callback query (from an inline button click).
+     */
+    bool answerCallbackQuery(const std::string& callbackQueryId,
+                             const std::string& text = "",
+                             bool showAlert = false);
+
+    /**
+     * @brief Sends a photo.
+     * @param photo File path, URL, or file_id.
+     */
+    bool sendPhoto(const std::string& chatId, const std::string& photo,
+                   const std::string& caption = "");
+
+    /**
+     * @brief Sends a document / file.
+     */
+    bool sendDocument(const std::string& chatId, const std::string& document,
+                      const std::string& caption = "");
+
+    // ── Group Management ──────────────────────────────────────────────────
+
+    bool banChatMember(const std::string& chatId, long long userId);
+    bool unbanChatMember(const std::string& chatId, long long userId);
+    bool promoteChatMember(const std::string& chatId, long long userId, bool canChangeInfo = false);
+    bool kickChatMember(const std::string& chatId, long long userId); // Deprecated alias for ban
+
+    /**
+     * @brief Sends an auto-generated /help listing all registered commands.
+     */
+    void sendHelpMessage(const std::string& chatId);
+
+    /**
+     * @brief Schedules a reminder.
+     */
+    void addReminder(const Reminder& reminder);
+
+    /**
+     * @brief Registers a user-defined custom command.
+     */
+    void registerCustomCommand(const CustomCommand& cc);
+
+    // Group Management Wrappers
+    void setWelcomeMessage(const std::string& message) { m_persistence.setWelcomeMessage(message); m_persistence.save(); }
+    void addFilteredKeyword(const std::string& keyword) { m_persistence.addFilteredKeyword(keyword); m_persistence.save(); }
+    void removeFilteredKeyword(const std::string& keyword) { m_persistence.removeFilteredKeyword(keyword); m_persistence.save(); }
+    std::vector<std::string> getFilteredKeywords() { return m_persistence.getFilteredKeywords(); }
 
 private:
-    std::string token; ///< The Telegram bot API token.
-    std::string apiUrl; ///< The base URL for the Telegram API.
-    long long lastUpdateId; ///< The ID of the last processed update.
-    std::unordered_map<std::string, Command> commandHandlers; ///< Map of registered commands and their handlers.
-    std::mutex commandMutex; ///< Mutex to protect access to commandHandlers.
-    std::mutex updateMutex; ///< Mutex to protect access to lastUpdateId.
-    RateLimiter rateLimiter; ///< Rate limiter to control user requests.
-    Network network; ///< Network utility for making HTTP requests.
+    std::string  m_token;
+    std::string  m_apiUrl;
+    long long    m_lastUpdateId = 0;
+    BotConfig    m_config;
 
-    /**
-     * @brief URL-encodes a string.
-     * @param text The string to encode.
-     * @return The URL-encoded string.
-     */
-    std::string urlEncode(const std::string& text);
+    std::unordered_map<std::string, Command> m_commandHandlers;
+    std::mutex   m_commandMutex;
+    std::mutex   m_updateMutex;
 
-    /**
-     * @brief Parses a JSON response from the Telegram API.
-     * @param jsonResponse The JSON response as a string.
-     * @return An optional Json::Value containing the parsed JSON, or std::nullopt if parsing fails.
-     */
+    RateLimiter         m_rateLimiter;
+    OutboundRateLimiter m_outboundLimiter;
+    Network             m_sendNetwork;
+    Network             m_pollNetwork;
+    ThreadPool          m_threadPool;
+    StateManager        m_stateManager;
+    Persistence         m_persistence;
+    std::unique_ptr<AIBrain> m_aiBrain;
+
+    volatile std::sig_atomic_t* m_shutdownPtr = nullptr;
+
+    // Exponential back-off state
+    int  m_backoffSeconds = 1;
+    static constexpr int kMaxBackoff = 60;
+
     std::optional<Json::Value> parseJsonResponse(const std::string& jsonResponse);
-
-    /**
-     * @brief Polls the Telegram API for new updates.
-     */
-    void pollUpdates();
-
-    /**
-     * @brief Processes updates received from the Telegram API.
-     * @param updates The JSON object containing the updates.
-     */
-    void processUpdates(const Json::Value& updates);
-
-    /**
-     * @brief Gets the ID of the last processed update.
-     * @return The last update ID.
-     */
+    void      pollUpdates();
+    void      processUpdates(const Json::Value& updates);
     long long getLastUpdateId();
+    void      updateLastUpdateId(long long updateId);
 
-    /**
-     * @brief Updates the ID of the last processed update.
-     * @param updateId The new update ID.
-     */
-    void updateLastUpdateId(long long updateId);
+public:
+    Network& getNetwork() { return m_sendNetwork; }
+    AIResponse askAI(long long userId, const std::string& query);
 };
 
 /**
  * @class Command
- * @brief A class representing a command that the bot can handle.
+ * @brief Handler + metadata for a single bot command.
  */
 class Command {
 public:
-    /**
-     * @brief Default constructor for Command.
-     */
     Command();
+    Command(const std::string& name,
+            const std::string& description,
+            std::function<void(const std::string&, const std::string&, TelegramBot&)> handler);
+    // Backwards-compatible constructor (no description)
+    Command(const std::string& name,
+            std::function<void(const std::string&, const std::string&, TelegramBot&)> handler);
 
-    /**
-     * @brief Constructs a Command object.
-     * @param name The name of the command.
-     * @param handler The function to handle the command.
-     */
-    Command(const std::string& name, std::function<void(const std::string&, const std::string&, TelegramBot&)> handler);
-
-    /**
-     * @brief Gets the name of the command.
-     * @return The name of the command.
-     */
-    std::string getName() const;
-
-    /**
-     * @brief Executes the command.
-     * @param chatId The ID of the chat where the command was issued.
-     * @param args The arguments provided with the command.
-     * @param bot The TelegramBot instance to interact with.
-     */
+    std::string getName()        const;
+    std::string getDescription() const;
     void execute(const std::string& chatId, const std::string& args, TelegramBot& bot) const;
 
 private:
-    std::string name; ///< The name of the command.
-    std::function<void(const std::string&, const std::string&, TelegramBot&)> handler; ///< The function to handle the command.
+    std::string m_name;
+    std::string m_description;
+    std::function<void(const std::string&, const std::string&, TelegramBot&)> m_handler;
 };
 
 #endif // TELEGRAMBOT_HPP

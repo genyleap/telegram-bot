@@ -18,7 +18,8 @@
 class Interface
 {
 public:
-  Interface();
+    Interface() = default;
+    virtual ~Interface() = default;
 };
 
 #endif // INTERFACE_HPP

@@ -62,7 +62,7 @@ set(PROJECT_VERSION_STRING ${PROJECT_VERSION}-${PROJECT_VERSION_TYPE})
 
 # Supported languages include C, CXX (i.e. C++), CUDA, OBJC (i.e. Objective-C), OBJCXX, Fortran, HIP, ISPC, and ASM. By default C and CXX are enabled if no language options are given.
 # Specify language NONE, or use the LANGUAGES keyword and list no languages, to skip enabling any languages.
-set(PROJECT_LANGUAGES CXX)
+set(PROJECT_LANGUAGES CXX C)
 
 #Use these keys [application, library]
 set(PROJECT_USAGE_TYPE "application" CACHE STRING "Usage Type.")
@@ -438,6 +438,9 @@ else()
         ${LIB_TARGET_LINK_DIRECTORIES}
         )
 
+    # Copy config to the app bundle for macOS
+    set(CONFIG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/config/system-config.json")
+    
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE_GUI_IDENTIFIER ${DEVELOPER_BUNDLE_IDENTIFIER}
         MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
@@ -445,6 +448,13 @@ else()
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/properties/${PLATFORM_FOLDER}/Info.plist.in"
         MACOSX_BUNDLE TRUE
         WIN32_EXECUTABLE TRUE
+        RESOURCE "${CONFIG_FILE}"
+    )
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/config
+        COMMAND ${CMAKE_COMMAND} -E copy ${CONFIG_FILE} $<TARGET_BUNDLE_CONTENT_DIR:${PROJECT_NAME}>/Resources/config/system-config.json
+        COMMENT "Copying system-config.json to app bundle Resources..."
     )
 
 endif()
@@ -458,6 +468,11 @@ if(BUILD_TESTING)
         source/telegrambot.cpp
         source/network.cpp
         source/logger.cpp
+        source/webhookserver.cpp
+        source/sysinfo.cpp
+        source/persistence.cpp
+        source/aibrain.cpp
+        source/calculator.cpp
     )
 
     target_include_directories(rate_limiter_test PRIVATE
@@ -471,6 +486,31 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME rate_limiter_test COMMAND $<TARGET_FILE:rate_limiter_test>)
+
+    # ── Production test suite ──────────────────────────────────────────────
+    add_executable(production_test
+        source/tests/production_test.cpp
+        source/telegrambot.cpp
+        source/network.cpp
+        source/logger.cpp
+        source/webhookserver.cpp
+        source/sysinfo.cpp
+        source/persistence.cpp
+        source/aibrain.cpp
+        source/calculator.cpp
+    )
+
+    target_include_directories(production_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/source
+    )
+
+    target_link_libraries(production_test PRIVATE
+        ${LIB_STL_MODULES_LINKER}
+        ${LIB_MODULES}
+        ${OS_LIBS}
+    )
+
+    add_test(NAME production_test COMMAND $<TARGET_FILE:production_test>)
 endif()
 
 #This command generates installation rules for a project.

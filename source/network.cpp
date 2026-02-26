@@ -1,7 +1,18 @@
 #include "network.hpp"
 #include "logger.hpp"
-#include <curl/curl.h>
 #include <format>
+
+Network::Network() : m_curlHandle(curl_easy_init()) {
+    if (!m_curlHandle) {
+        Logger::error("Failed to initialize CURL handle in Network constructor.");
+    }
+}
+
+Network::~Network() {
+    if (m_curlHandle) {
+        curl_easy_cleanup(m_curlHandle);
+    }
+}
 
 size_t Network::WriteCallback(void* contents, size_t size, size_t nmemb, std::string* outBuffer) {
     size_t totalSize = size * nmemb;
@@ -9,37 +20,130 @@ size_t Network::WriteCallback(void* contents, size_t size, size_t nmemb, std::st
     return totalSize;
 }
 
+int Network::ProgressCallback(void* clientp, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+    if (clientp) {
+        auto* cancelCheck = static_cast<std::function<bool()>*>(clientp);
+        if (cancelCheck && (*cancelCheck) && (*cancelCheck)()) {
+            return 1; // Non-zero value aborts the transfer
+        }
+    }
+    return 0;
+}
+
+std::string Network::urlEncode(const std::string& text) const {
+    if (!m_curlHandle) return text;
+    
+    std::lock_guard<std::mutex> lock(m_networkMutex);
+    char* encoded = curl_easy_escape(m_curlHandle, text.c_str(), static_cast<int>(text.length()));
+    if (encoded) {
+        std::string result(encoded);
+        curl_free(encoded);
+        return result;
+    }
+    return text;
+}
+
 std::string Network::buildQueryString(const std::map<std::string, std::string>& params) const {
-    std::shared_lock lock(networkMutex);
     std::string queryString;
     for (const auto& [key, value] : params) {
-        queryString += std::format("{}={}&", key, value);
+        queryString += std::format("{}={}&", key, urlEncode(value));
     }
     if (!queryString.empty()) queryString.pop_back(); // Remove trailing '&'
     return queryString;
 }
 
-bool Network::sendRequest(const std::string& url, std::string& response, bool verbose) {
-    Logger::formattedInfo("Constructed URL: {}", url);
-
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        Logger::error("Failed to initialize CURL");
+bool Network::sendRequest(const std::string& url, std::string& response,
+                          long timeoutSeconds, bool verbose,
+                          std::function<bool()> cancelCheck,
+                          const std::map<std::string, std::string>& headers) {
+    if (!m_curlHandle) {
+        Logger::error("CURL handle not initialized.");
         return false;
     }
 
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    if (verbose) curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+    std::lock_guard<std::mutex> lock(m_networkMutex);
+    
+    curl_easy_reset(m_curlHandle);
+    curl_easy_setopt(m_curlHandle, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(m_curlHandle, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(m_curlHandle, CURLOPT_WRITEDATA, &response);
 
-    CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
+    // Set headers if provided
+    struct curl_slist* chunk = nullptr;
+    for (const auto& [key, value] : headers) {
+        chunk = curl_slist_append(chunk, std::format("{}: {}", key, value).c_str());
+    }
+    if (chunk) {
+        curl_easy_setopt(m_curlHandle, CURLOPT_HTTPHEADER, chunk);
+    }
+
+    if (timeoutSeconds > 0)
+        curl_easy_setopt(m_curlHandle, CURLOPT_TIMEOUT, timeoutSeconds);
+    
+    // Modern best practices
+    curl_easy_setopt(m_curlHandle, CURLOPT_CONNECTTIMEOUT, 30L);
+    curl_easy_setopt(m_curlHandle, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(m_curlHandle, CURLOPT_USERAGENT, "TelegramBot/1.0");
+
+    if (verbose)
+        curl_easy_setopt(m_curlHandle, CURLOPT_VERBOSE, 1L);
+
+    // SSL Robustness
+    curl_easy_setopt(m_curlHandle, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(m_curlHandle, CURLOPT_SSL_VERIFYHOST, 2L);
+    
+    // Use modern TLS versions
+    curl_easy_setopt(m_curlHandle, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
+
+    if (cancelCheck) {
+        curl_easy_setopt(m_curlHandle, CURLOPT_XFERINFOFUNCTION, ProgressCallback);
+        curl_easy_setopt(m_curlHandle, CURLOPT_XFERINFODATA, &cancelCheck);
+        curl_easy_setopt(m_curlHandle, CURLOPT_NOPROGRESS, 0L);
+    }
+
+    CURLcode res = curl_easy_perform(m_curlHandle);
+
+    if (chunk) {
+        curl_slist_free_all(chunk);
+    }
 
     if (res != CURLE_OK) {
-        Logger::formattedError("CURL error: {}", curl_easy_strerror(res));
+        if (res != CURLE_ABORTED_BY_CALLBACK) {
+            Logger::formattedError("CURL error: {}", curl_easy_strerror(res));
+        }
         return false;
     }
 
+    return true;
+}
+
+bool Network::postRequest(const std::string& url, const std::string& body, std::string& response,
+                          long timeoutSeconds, bool verbose,
+                          const std::map<std::string, std::string>& headers) {
+    if (!m_curlHandle) return false;
+
+    std::lock_guard<std::mutex> lock(m_networkMutex);
+    curl_easy_reset(m_curlHandle);
+    curl_easy_setopt(m_curlHandle, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(m_curlHandle, CURLOPT_POST, 1L);
+    curl_easy_setopt(m_curlHandle, CURLOPT_POSTFIELDS, body.c_str());
+    curl_easy_setopt(m_curlHandle, CURLOPT_POSTFIELDSIZE, body.length());
+    curl_easy_setopt(m_curlHandle, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(m_curlHandle, CURLOPT_WRITEDATA, &response);
+    if (timeoutSeconds > 0) curl_easy_setopt(m_curlHandle, CURLOPT_TIMEOUT, timeoutSeconds);
+
+    struct curl_slist* chunk = nullptr;
+    for (const auto& [key, value] : headers) {
+        chunk = curl_slist_append(chunk, std::format("{}: {}", key, value).c_str());
+    }
+    if (chunk) curl_easy_setopt(m_curlHandle, CURLOPT_HTTPHEADER, chunk);
+
+    CURLcode res = curl_easy_perform(m_curlHandle);
+    if (chunk) curl_slist_free_all(chunk);
+
+    if (res != CURLE_OK) {
+        Logger::formattedError("CURL POST error: {}", curl_easy_strerror(res));
+        return false;
+    }
     return true;
 }

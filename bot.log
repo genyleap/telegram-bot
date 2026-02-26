@@ -1,0 +1,6 @@
+[2026-02-26 23:16:28] [INFO]    Starting in long-polling mode.
+[2026-02-26 23:16:28] [INFO]    Bot started (long-polling mode). Press Ctrl+C to stop cleanly.
+[2026-02-26 23:16:28] [DEBUG]   Polling: https://api.telegram.org/bot<TOKEN>/getUpdates?offset=1&timeout=30
+[2026-02-26 23:16:59] [JSON]    {"ok":true,"result":[]}
+[2026-02-26 23:16:59] [INFO]    Shutdown signal received. Exiting poll loop.
+[2026-02-26 23:16:59] [INFO]    Bot shut down cleanly.

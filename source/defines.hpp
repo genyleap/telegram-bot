@@ -14,7 +14,7 @@ namespace Defines {
 #define ON          0x1
 #define CANCEL      0x0
 #define FAILED      0x0
-#define SUCCESS     0x0
+#define SUCCESS     0x1
 #define OFF         0x0
 
 #define ABSTRACTS 0x1 // Abstraction
@@ -127,11 +127,6 @@ namespace Defines {
 
 #define APPLE_URL                      "http://apple.com"
 #define APPLE_SSL_URL                  "https://apple.com"
-#define APPLE_NS_USA                   "104.154.51.7"
-#define APPLE_NS_EUROPE                "104.155.28.90"
-#define APPLE_NS_ASIA                  "104.155.220.58"
-#define APPLE_NS_SOUTH_AMERICA         "35.199.88.219"
-#define APPLE_NS_AUSTRALIA_OCEANIA     "35.189.47.23"
 
 #define CLOUD_FLARE_NS1                "1.1.1.1"
 #define CLOUD_FLARE_NS2                "1.0.0.1"
@@ -150,7 +145,7 @@ namespace Defines {
 #define PROTOCOL_FTP     "ftp://"        // FTP PTOTOCOL - FTP data transfer (USING PORT : 20)
 
 //! System actions
-#define EXIT 0;
+#define EXIT 0
 
 }
 
