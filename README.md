@@ -1,4 +1,4 @@
-# Telegram Bot in C++
+# Super TelegramBot
 
 A robust, production-grade Telegram bot implementation in modern C++ featuring command routing, persistent state, background threading, and extensive built-in functionality.
 
@@ -46,6 +46,33 @@ A background engine that automatically polls RSS feeds (default every 15 mins) a
 - jsoncpp
 - pugixml (for RSS parsing)
 
+## ⚙️ Configuration
+
+Before running the bot, you should configure it via the `config/system-config.json` file. Here are some of the key settings:
+
+```json
+{
+    "debug": true,
+    "token": "YOUR_TELEGRAM_BOT_TOKEN_HERE",
+    "ai_api_key": "YOUR_OPENAI_OR_OPENCLAW_API_KEY",
+    "thread_pool_size": 4,
+    "long_poll_timeout": 30,
+    "rss_check_interval": 300,
+    "webhook": {
+        "enabled": false,
+        "url": "https://yourdomain.com",
+        "path": "/webhook",
+        "port": 8443
+    }
+}
+```
+
+- **`token`**: Your Telegram bot token retrieved from [@BotFather](https://t.me/BotFather).
+- **`ai_api_key`**: Your API key used for the `/ai` command (OpenAI compatible).
+- **`thread_pool_size`**: Number of threads to use for background command processing.
+- **`rss_check_interval`**: How often the bot checks for new RSS items (in seconds).
+- **`webhook`**: Configure if you want to run the bot using incoming Webhooks rather than Long-Polling (`enabled: true/false`).
+
 ## 🚀 Build & Run
 
 Use a clean build directory:
@@ -59,9 +86,9 @@ cmake --build build
 # Modify config/system-config.json to set your bot token, RSS interval, webhook settings, etc.
 
 # Run the Bot
-./build/macOS/TelegramBot.app/Contents/MacOS/TelegramBot
+./TelegramBot
 # Or pass the token as an argument:
-# ./build/macOS/TelegramBot.app/Contents/MacOS/TelegramBot <BOT_TOKEN>
+# .TelegramBot <BOT_TOKEN>
 ```
 
 ## 🧪 Test
