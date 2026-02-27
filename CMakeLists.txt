@@ -1,6 +1,6 @@
 # -------------------- PROJECT TEMPLATE INFO ---------------------------------------------
 #   Title   :                       Project Template
-#   Version :                       1.2.20
+#   Version :                       1.2.256
 #   Author  :                       Kambiz Asadzadeh (compez.eth)
 #   License :                       MIT
 #   Url     :                       https://github.com/genyleap/Project-Template
@@ -33,8 +33,8 @@ set(PROJECT_NAME "TelegramBot" CACHE STRING "Project Name.") #You can change "Pr
 set(PROJECT_TARGET ${PROJECT_NAME} CACHE STRING "Project Target Name.")
 
 set(PROJECT_VERSION_MAJOR 1)
-set(PROJECT_VERSION_MINOR 0)
-set(PROJECT_VERSION_PATCH 6)
+set(PROJECT_VERSION_MINOR 2)
+set(PROJECT_VERSION_PATCH 256)
 
 # ---- Project settings ----
 set_property(GLOBAL APPEND PROPERTY USE_FOLDERS ON)
