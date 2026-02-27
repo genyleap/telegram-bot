@@ -5,6 +5,26 @@ A robust, production-grade Telegram bot implementation in modern C++ featuring c
 ## ✨ Features
 
 ### Core Architecture
+
+```mermaid
+graph TD
+    A[Telegram API] <--> B[Network Engine / libcurl]
+    B --> C(Webhook / Long-Polling Server)
+    C --> D{Command Router}
+    
+    D --> E((Core Modules))
+    
+    E --> F[Thread Pool Executor]
+    E --> G[(Persistence Data JSon)]
+    E --> H[Rate Limiters]
+    E --> I[AI Brain / OpenClaw]
+    
+    J((Background Workers)) --> K[RSS Feed Parser]
+    J --> L[Reminders Engine]
+    K --> E
+    L --> E
+```
+
 - **Modern C++23**: Built with safety, speed, and modern paradigms.
 - **Dual Modes**: Supports both **Long-Polling** and **Webhook** operation modes.
 - **Thread Pool**: Asynchronous command execution so slow network calls don't block the bot.

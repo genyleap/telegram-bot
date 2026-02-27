@@ -223,8 +223,8 @@ void TelegramBot::start(volatile std::sig_atomic_t& shutdown) {
                 bot.sendMessage(chatId, "❌ Usage: `/rss_add <url>`", true);
                 return;
             }
-            bot.addRSSFeed(chatId, args);
             bot.sendMessage(chatId, "⏳ Fetching feed info...");
+            bot.addRSSFeed(chatId, args);
         }
     ));
 
@@ -675,8 +675,20 @@ void TelegramBot::processUpdates(const Json::Value& updates) {
                 }
             }
 
-            // Trim leading whitespace
-            args.erase(0, args.find_first_not_of(' '));
+            if (found) {
+                // Remove @bot_username if it's appended to the command
+                if (!args.empty() && args[0] == '@') {
+                    size_t spacePos = args.find(' ');
+                    if (spacePos != std::string::npos) {
+                        args = args.substr(spacePos + 1);
+                    } else {
+                        args.clear();
+                    }
+                }
+                
+                // Trim leading whitespace
+                args.erase(0, args.find_first_not_of(' '));
+            }
 
             if (found) {
                 // Execute command asynchronously on thread pool
