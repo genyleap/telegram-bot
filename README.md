@@ -6,7 +6,7 @@ A robust, production-grade Telegram bot implementation in modern C++ featuring c
 
 ### Core Architecture
 - **Modern C++23**: Built with safety, speed, and modern paradigms.
-- **Dual Modes**: Supports both **Long-Po[GenyConnect.exe.35048.dmp](../../../Downloads/GenyConnect.exe.35048.dmp)lling** and **Webhook** operation modes.
+- **Dual Modes**: Supports both **Long-Polling** and **Webhook** operation modes.
 - **Thread Pool**: Asynchronous command execution so slow network calls don't block the bot.
 - **Rate Limiting**: Includes both inbound (per-user) and outbound (global and per-chat) rate limiting to comply with Telegram API limits.
 - **Persistence**: Automatically saves dynamic data (reminders, RSS feeds, custom commands, state) to disk (`data/bot_data.json`).
