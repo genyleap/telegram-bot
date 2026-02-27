@@ -19,6 +19,14 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/config/")
 include(ExternalProject)
 include(FetchContent)
 
+# ------ RSS PARSING DEPENDENCY ------
+FetchContent_Declare(
+  pugixml
+  GIT_REPOSITORY https://github.com/zeux/pugixml.git
+  GIT_TAG        v1.14
+)
+FetchContent_MakeAvailable(pugixml)
+
 # ------ PROJECT INFO ------
 # Options
 set(PROJECT_NAME "TelegramBot" CACHE STRING "Project Name.") #You can change "ProjectTemplate" with your project name.
@@ -371,6 +379,7 @@ if(GUI_APPLICATION AND PROJECT_MAIN_TYPE STREQUAL "qt" OR PROJECT_MAIN_TYPE STRE
             ${LIB_MODULES}
             ${QT_MODULES_LINK}
             ${OS_LIBS}
+            pugixml
         )
 
     #Extra Modules
@@ -425,6 +434,7 @@ else()
             ${LIB_STL_MODULES_LINKER}
             ${LIB_MODULES}
             ${OS_LIBS}
+            pugixml
         )
     target_include_directories(${PROJECT_NAME}
         PUBLIC
@@ -473,6 +483,7 @@ if(BUILD_TESTING)
         source/persistence.cpp
         source/aibrain.cpp
         source/calculator.cpp
+        source/rssmanager.cpp
     )
 
     target_include_directories(rate_limiter_test PRIVATE
@@ -483,6 +494,7 @@ if(BUILD_TESTING)
         ${LIB_STL_MODULES_LINKER}
         ${LIB_MODULES}
         ${OS_LIBS}
+        pugixml
     )
 
     add_test(NAME rate_limiter_test COMMAND $<TARGET_FILE:rate_limiter_test>)
@@ -498,6 +510,7 @@ if(BUILD_TESTING)
         source/persistence.cpp
         source/aibrain.cpp
         source/calculator.cpp
+        source/rssmanager.cpp
     )
 
     target_include_directories(production_test PRIVATE
@@ -508,6 +521,7 @@ if(BUILD_TESTING)
         ${LIB_STL_MODULES_LINKER}
         ${LIB_MODULES}
         ${OS_LIBS}
+        pugixml
     )
 
     add_test(NAME production_test COMMAND $<TARGET_FILE:production_test>)

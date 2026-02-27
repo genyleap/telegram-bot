@@ -26,6 +26,7 @@
 class TelegramBot;
 class Command;
 class AIBrain;
+class RSSManager;
 struct AIResponse;
 
 /**
@@ -39,6 +40,7 @@ struct BotConfig {
     std::string logFile;
     std::string stateFile       = ".bot_state";
     int         longPollTimeout = 30;     ///< getUpdates timeout in seconds (polling mode)
+    int         rssCheckInterval = 900;    ///< Interval between RSS checks in seconds
     std::string aiApiKey;
 
     // ── Webhook mode ──────────────────────────────────────────────────────
@@ -219,6 +221,13 @@ public:
     void removeFilteredKeyword(const std::string& keyword) { m_persistence.removeFilteredKeyword(keyword); m_persistence.save(); }
     std::vector<std::string> getFilteredKeywords() { return m_persistence.getFilteredKeywords(); }
 
+    // RSS Support
+    void addRSSFeed(const std::string& chatId, const std::string& url);
+    void removeRSSFeed(const std::string& chatId, const std::string& url);
+    void updateRSSFeed(const RSSFeed& feed);
+    std::vector<RSSFeed> getRSSFeeds(const std::string& chatId);
+    void checkRSSFeeds();
+
 private:
     std::string  m_token;
     std::string  m_apiUrl;
@@ -237,6 +246,7 @@ private:
     StateManager        m_stateManager;
     Persistence         m_persistence;
     std::unique_ptr<AIBrain> m_aiBrain;
+    std::unique_ptr<RSSManager> m_rssManager;
 
     volatile std::sig_atomic_t* m_shutdownPtr = nullptr;
 
@@ -249,6 +259,8 @@ private:
     void      processUpdates(const Json::Value& updates);
     long long getLastUpdateId();
     void      updateLastUpdateId(long long updateId);
+    static std::string escapeMarkdown(const std::string& text);
+    static std::string stripHTML(const std::string& text);
 
 public:
     Network& getNetwork() { return m_sendNetwork; }

@@ -59,6 +59,7 @@ BotConfig loadConfig(const std::string& defaultPath = "config/system-config.json
     cfg.logFile         = root.get("log_file",         "").asString();
     cfg.stateFile       = root.get("state_file",       ".bot_state").asString();
     cfg.longPollTimeout = root.get("long_poll_timeout", 30).asInt();
+    cfg.rssCheckInterval = root.get("rss_check_interval", 900).asInt();
     cfg.aiApiKey        = root.get("ai_api_key",       "").asString();
 
     // Webhook section

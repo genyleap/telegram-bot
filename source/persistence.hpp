@@ -22,6 +22,16 @@ struct CustomCommand {
     std::string content;
 };
 
+struct RSSFeed {
+    std::string url;
+    std::string title;
+    std::string description;
+    std::string emoji;
+    std::string logoUrl;
+    std::string chatId;
+    std::string lastGuid;
+};
+
 /**
  * @class Persistence
  * @brief Handles persistent storage of bot data (reminders, settings) using JSON.
@@ -45,6 +55,12 @@ public:
     void addFilteredKeyword(const std::string& keyword);
     void removeFilteredKeyword(const std::string& keyword);
     std::vector<std::string> getFilteredKeywords();
+
+    // RSS feeds
+    void addRSSFeed(const RSSFeed& feed);
+    void removeRSSFeed(const std::string& url);
+    std::vector<RSSFeed> getRSSFeeds();
+    void updateRSSFeed(const RSSFeed& feed);
 
     void save();
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <sstream>
 #include "aibrain.hpp"
+#include "rssmanager.hpp"
 
 // ─── Keyboard Implementations ───────────────────────────────────────────────
 
@@ -152,6 +153,10 @@ TelegramBot::TelegramBot(const std::string& token, const BotConfig& config)
         Logger::info("AI Brain initialized.");
     }
 
+    // RSS Manager Initialization
+    m_rssManager = std::make_unique<RSSManager>(m_sendNetwork);
+    Logger::info("RSS Manager initialized.");
+
     // Restore persisted update ID
     m_lastUpdateId = m_stateManager.loadLastUpdateId();
 
@@ -209,6 +214,78 @@ void TelegramBot::start(volatile std::sig_atomic_t& shutdown) {
     
     // Add reminder processor
     auto lastCheck = std::chrono::steady_clock::now();
+    auto lastRSSCheck = std::chrono::steady_clock::now();
+
+    // Register RSS commands
+    registerCommand(Command("/rss_add", "Subscribe to an RSS feed. Usage: /rss_add <url>",
+        [](const std::string& chatId, const std::string& args, TelegramBot& bot) {
+            if (args.empty()) {
+                bot.sendMessage(chatId, "❌ Usage: `/rss_add <url>`", true);
+                return;
+            }
+            bot.addRSSFeed(chatId, args);
+            bot.sendMessage(chatId, "⏳ Fetching feed info...");
+        }
+    ));
+
+    registerCommand(Command("/rss_list", "List subscribed RSS feeds.",
+        [](const std::string& chatId, const std::string&, TelegramBot& bot) {
+            auto feeds = bot.getRSSFeeds(chatId);
+            if (feeds.empty()) {
+                bot.sendMessage(chatId, "You have no RSS subscriptions.");
+                return;
+            }
+            std::string list = "📰 *Your RSS Subscriptions*:\n\n";
+            for (size_t i = 0; i < feeds.size(); ++i) {
+                list += std::to_string(i + 1) + ". " + feeds[i].emoji + " [" + escapeMarkdown(feeds[i].title) + "](" + feeds[i].url + ")\n";
+            }
+            bot.sendMessage(chatId, list, true);
+        }
+    ));
+
+    registerCommand(Command("/rss_remove", "Unsubscribe from an RSS feed. Usage: /rss_remove <url>",
+        [](const std::string& chatId, const std::string& args, TelegramBot& bot) {
+            if (args.empty()) {
+                bot.sendMessage(chatId, "❌ Usage: `/rss_remove <url>`", true);
+                return;
+            }
+            bot.removeRSSFeed(chatId, args);
+            bot.sendMessage(chatId, "✅ Unsubscribed from " + args);
+        }
+    ));
+
+    registerCommand(Command("/rss_config", "Configure an RSS feed. Usage: /rss_config <url> <emoji|title> <value>",
+        [](const std::string& chatId, const std::string& args, TelegramBot& bot) {
+            std::istringstream iss(args);
+            std::string url, key, value;
+            if (!(iss >> url >> key)) {
+                bot.sendMessage(chatId, "❌ Usage: `/rss_config <url> <emoji|title> <value...>`", true);
+                return;
+            }
+            std::getline(iss, value);
+            if (!value.empty() && value[0] == ' ') value.erase(0, 1);
+
+            auto feeds = bot.getRSSFeeds(chatId);
+            bool found = false;
+            for (auto& f : feeds) {
+                if (f.url == url) {
+                    if (key == "emoji") f.emoji = value;
+                    else if (key == "title") f.title = value;
+                    else {
+                        bot.sendMessage(chatId, "❌ Invalid key. Use `emoji` or `title`.");
+                        return;
+                    }
+                    // Update in persistence (we need a way to update specifically this feed)
+                    // Persistence::updateRSSFeed already takes the whole struct.
+                    bot.updateRSSFeed(f);
+                    bot.sendMessage(chatId, "✅ Updated " + key + " for " + url);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) bot.sendMessage(chatId, "❌ Feed not found: " + url);
+        }
+    ));
 
     while (!shutdown) {
         pollUpdates();
@@ -223,6 +300,12 @@ void TelegramBot::start(volatile std::sig_atomic_t& shutdown) {
             }
             if (!pending.empty()) m_persistence.save();
             lastCheck = now;
+        }
+
+        // Check RSS feeds every configurable interval (default 15 minutes)
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastRSSCheck).count() >= m_config.rssCheckInterval) {
+            checkRSSFeeds();
+            lastRSSCheck = now;
         }
     }
     Logger::info("Shutdown signal received. Exiting poll loop.");
@@ -413,9 +496,9 @@ void TelegramBot::sendHelpMessage(const std::string& chatId) {
     {
         std::lock_guard<std::mutex> lock(m_commandMutex);
         for (const auto& [name, cmd] : m_commandHandlers) {
-            helpText += name;
+            helpText += escapeMarkdown(name);
             if (const auto& desc = cmd.getDescription(); !desc.empty())
-                helpText += " — " + desc;
+                helpText += " — " + escapeMarkdown(desc);
             helpText += '\n';
         }
     }
@@ -542,7 +625,7 @@ void TelegramBot::processUpdates(const Json::Value& updates) {
 
             InlineKeyboardMarkup markup;
             markup.inlineKeyboard = {{ {"Check File", "analyze_file", ""} }};
-            sendMessage(chatId, "📄 *Document Received*\nName: `" + fileName + "`", true, markup.toJson());
+            sendMessage(chatId, "📄 *Document Received*\nName: `" + escapeMarkdown(fileName) + "`", true, markup.toJson());
         }
 
         // ── Handle Text Commands ──────────────────────────────────────────
@@ -620,6 +703,34 @@ void TelegramBot::updateLastUpdateId(long long updateId) {
     }
 }
 
+std::string TelegramBot::escapeMarkdown(const std::string& text) {
+    std::string escaped;
+    escaped.reserve(text.size());
+    for (char c : text) {
+        if (c == '_' || c == '*' || c == '`' || c == '[' || c == ']') {
+            escaped += '\\';
+        }
+        escaped += c;
+    }
+    return escaped;
+}
+
+std::string TelegramBot::stripHTML(const std::string& text) {
+    std::string cleanText;
+    bool inTag = false;
+    for (char c : text) {
+        if (c == '<') {
+            inTag = true;
+        } else if (c == '>') {
+            inTag = false;
+        } else if (!inTag) {
+            cleanText += c;
+        }
+    }
+    // Optional: trim whitespace or collapse multiple whitespaces
+    return cleanText;
+}
+
 void TelegramBot::addReminder(const Reminder& reminder) {
     m_persistence.addReminder(reminder);
     m_persistence.save();
@@ -652,4 +763,88 @@ AIResponse TelegramBot::askAI(long long userId, const std::string& query) {
         return {false, "", "AI Brain not initialized (missing API key)"};
     }
     return m_aiBrain->ask(userId, query);
+}
+
+void TelegramBot::addRSSFeed(const std::string& chatId, const std::string& url) {
+    RSSFeed feed;
+    feed.url = url;
+    feed.chatId = chatId;
+    feed.emoji = "📰"; // Default emoji
+    
+    // Fetch initial info
+    std::vector<RSSItem> items;
+    if (m_rssManager->fetchFeed(url, items, feed)) {
+        if (!items.empty()) {
+            feed.lastGuid = items[0].guid;
+        }
+        m_persistence.addRSSFeed(feed);
+        m_persistence.save();
+        sendMessage(chatId, "✅ Successfully subscribed to *" + feed.title + "*", true);
+    } else {
+        sendMessage(chatId, "❌ Failed to fetch RSS feed. Please check the URL.");
+    }
+}
+
+void TelegramBot::removeRSSFeed(const std::string& chatId, const std::string& url) {
+    m_persistence.removeRSSFeed(url);
+    m_persistence.save();
+}
+
+std::vector<RSSFeed> TelegramBot::getRSSFeeds(const std::string& chatId) {
+    auto all = m_persistence.getRSSFeeds();
+    std::vector<RSSFeed> filtered;
+    for (const auto& f : all) {
+        if (f.chatId == chatId) filtered.push_back(f);
+    }
+    return filtered;
+}
+
+void TelegramBot::updateRSSFeed(const RSSFeed& feed) {
+    m_persistence.updateRSSFeed(feed);
+    m_persistence.save();
+}
+
+void TelegramBot::checkRSSFeeds() {
+    Logger::info("Checking RSS feeds for updates...");
+    auto feeds = m_persistence.getRSSFeeds();
+    bool updated = false;
+
+    for (auto& feed : feeds) {
+        std::vector<RSSItem> items;
+        if (m_rssManager->fetchFeed(feed.url, items, feed)) {
+            if (items.empty()) continue;
+
+            // Find new items (those after lastGuid)
+            std::vector<RSSItem> newItems;
+            for (const auto& item : items) {
+                if (item.guid == feed.lastGuid) break;
+                newItems.push_back(item);
+            }
+
+            if (!newItems.empty()) {
+                // Reverse to post oldest first
+                std::reverse(newItems.begin(), newItems.end());
+                for (const auto& item : newItems) {
+                    std::string msg = feed.emoji + " *[" + escapeMarkdown(feed.title) + "]*\n\n";
+                    msg += "*" + escapeMarkdown(item.title) + "*\n\n";
+                    if (!item.description.empty()) {
+                        // Strip HTML and truncate description if too long
+                        std::string desc = stripHTML(item.description);
+                        if (desc.size() > 200) desc = desc.substr(0, 197) + "...";
+                        if (!desc.empty()) {
+                            msg += escapeMarkdown(desc) + "\n\n";
+                        }
+                    }
+                    msg += "[Read More](" + item.link + ")";
+                    
+                    sendMessage(feed.chatId, msg, true);
+                }
+                feed.lastGuid = items[0].guid;
+                m_persistence.updateRSSFeed(feed);
+                updated = true;
+            }
+        }
+    }
+
+    if (updated) m_persistence.save();
 }

@@ -17,6 +17,7 @@ void Persistence::load() {
         m_root["reminders"] = Json::Value(Json::arrayValue);
         m_root["custom_commands"] = Json::Value(Json::arrayValue);
         m_root["filtered_keywords"] = Json::Value(Json::arrayValue);
+        m_root["rss_feeds"] = Json::Value(Json::arrayValue);
         m_root["welcome_message"] = "";
         return;
     }
@@ -29,6 +30,7 @@ void Persistence::load() {
         m_root["reminders"] = Json::Value(Json::arrayValue);
         m_root["custom_commands"] = Json::Value(Json::arrayValue);
         m_root["filtered_keywords"] = Json::Value(Json::arrayValue);
+        m_root["rss_feeds"] = Json::Value(Json::arrayValue);
         m_root["welcome_message"] = "";
     }
 }
@@ -179,4 +181,72 @@ std::vector<std::string> Persistence::getFilteredKeywords() {
         }
     }
     return result;
+}
+
+void Persistence::addRSSFeed(const RSSFeed& feed) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_root.isMember("rss_feeds")) {
+        m_root["rss_feeds"] = Json::Value(Json::arrayValue);
+    }
+    
+    // Check if it already exists
+    for (const auto& f : m_root["rss_feeds"]) {
+        if (f["url"].asString() == feed.url && f["chat_id"].asString() == feed.chatId) return;
+    }
+
+    Json::Value jFeed;
+    jFeed["url"]         = feed.url;
+    jFeed["title"]       = feed.title;
+    jFeed["description"] = feed.description;
+    jFeed["emoji"]       = feed.emoji;
+    jFeed["logo_url"]    = feed.logoUrl;
+    jFeed["chat_id"]     = feed.chatId;
+    jFeed["last_guid"]   = feed.lastGuid;
+    m_root["rss_feeds"].append(jFeed);
+}
+
+void Persistence::removeRSSFeed(const std::string& url) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_root.isMember("rss_feeds")) return;
+    Json::Value newFeeds(Json::arrayValue);
+    for (const auto& f : m_root["rss_feeds"]) {
+        if (f["url"].asString() != url) {
+            newFeeds.append(f);
+        }
+    }
+    m_root["rss_feeds"] = newFeeds;
+}
+
+std::vector<RSSFeed> Persistence::getRSSFeeds() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<RSSFeed> result;
+    if (m_root.isMember("rss_feeds")) {
+        for (const auto& f : m_root["rss_feeds"]) {
+            result.push_back({
+                f["url"].asString(),
+                f["title"].asString(),
+                f["description"].asString(),
+                f["emoji"].asString(),
+                f["logo_url"].asString(),
+                f["chat_id"].asString(),
+                f["last_guid"].asString()
+            });
+        }
+    }
+    return result;
+}
+
+void Persistence::updateRSSFeed(const RSSFeed& feed) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_root.isMember("rss_feeds")) return;
+    for (auto& f : m_root["rss_feeds"]) {
+        if (f["url"].asString() == feed.url) {
+            f["title"]       = feed.title;
+            f["description"] = feed.description;
+            f["emoji"]       = feed.emoji;
+            f["logo_url"]    = feed.logoUrl;
+            f["last_guid"]   = feed.lastGuid;
+            break;
+        }
+    }
 }

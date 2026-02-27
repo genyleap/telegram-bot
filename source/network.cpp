@@ -83,7 +83,17 @@ bool Network::sendRequest(const std::string& url, std::string& response,
     // Modern best practices
     curl_easy_setopt(m_curlHandle, CURLOPT_CONNECTTIMEOUT, 30L);
     curl_easy_setopt(m_curlHandle, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(m_curlHandle, CURLOPT_USERAGENT, "TelegramBot/1.0");
+    // Set dynamic User-Agent based on Host OS to avoid anti-bot blocks
+#if defined(_WIN32)
+    const char* userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+#elif defined(__APPLE__)
+    const char* userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+#elif defined(__linux__)
+    const char* userAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+#else
+    const char* userAgent = "Mozilla/5.0 (compatible; TelegramBot/1.0)";
+#endif
+    curl_easy_setopt(m_curlHandle, CURLOPT_USERAGENT, userAgent);
 
     if (verbose)
         curl_easy_setopt(m_curlHandle, CURLOPT_VERBOSE, 1L);
