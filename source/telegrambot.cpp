@@ -66,7 +66,7 @@ bool RateLimiter::allowRequest(const std::string& userId) {
 }
 
 // ─── OutboundRateLimiter ─────────────────────────────────────────────────────
-void OutboundRateLimiter::throttle(const std::string& chatId) {
+void OutboundRateLimiter::throttle(const std::string& chatId, volatile std::sig_atomic_t* shutdownPtr) {
     using namespace std::chrono;
     while (true) {
         std::unique_lock<std::mutex> lock(m_mutex);
@@ -101,7 +101,10 @@ void OutboundRateLimiter::throttle(const std::string& chatId) {
                                                    globalOk  ? now : wakeGlobal,
                                                    perChatOk ? now : wakePerChat});
         lock.unlock();
-        std::this_thread::sleep_until(wake);
+        while (steady_clock::now() < wake) {
+            if (shutdownPtr && *shutdownPtr) return;
+            std::this_thread::sleep_for(milliseconds(50));
+        }
     }
 }
 
@@ -386,7 +389,8 @@ void TelegramBot::startWebhook(volatile std::sig_atomic_t& shutdown) {
 bool TelegramBot::sendMessage(const std::string& chatId, const std::string& text,
                               bool useMarkdown, std::optional<Json::Value> replyMarkup) {
     // Block if we are about to exceed Telegram API rate limits
-    m_outboundLimiter.throttle(chatId);
+    m_outboundLimiter.throttle(chatId, m_shutdownPtr);
+    if (m_shutdownPtr && *m_shutdownPtr) return false;
 
     std::map<std::string, std::string> params = {
         {"chat_id", chatId},

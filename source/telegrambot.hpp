@@ -120,7 +120,7 @@ private:
 class OutboundRateLimiter {
 public:
     OutboundRateLimiter() = default;
-    void throttle(const std::string& chatId);
+    void throttle(const std::string& chatId, volatile std::sig_atomic_t* shutdownPtr = nullptr);
 
 private:
     std::mutex                                                          m_mutex;
